@@ -9,6 +9,9 @@ for _p in (_here, _parent):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+from dotenv import load_dotenv
+load_dotenv()
+
 import streamlit as st
 from claude_agent import WorkflowAgent, MODELS
 from workflow_builder import build_workflow_yaml

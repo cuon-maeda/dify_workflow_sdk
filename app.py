@@ -13,8 +13,16 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import streamlit as st
-from claude_agent import WorkflowAgent, MODELS
+from claude_agent import ClaudeWorkflowAgent, MODELS as CLAUDE_MODELS
+from openai_agent import OpenAIWorkflowAgent, MODELS as OPENAI_MODELS
 from workflow_builder import build_workflow_yaml
+
+MODELS = {"Claude": CLAUDE_MODELS, "OpenAI": OPENAI_MODELS}
+
+def _make_agent(provider: str, model: str):
+    if provider == "Claude":
+        return ClaudeWorkflowAgent(model=model)
+    return OpenAIWorkflowAgent(model=model)
 
 st.set_page_config(
     page_title="Dify Workflow Designer",
@@ -52,7 +60,7 @@ with st.sidebar:
     current_key = f"{provider}/{model}"
     if st.session_state.get("_model_key") != current_key:
         st.session_state._model_key = current_key
-        st.session_state.agent = WorkflowAgent(provider=provider, model=model)
+        st.session_state.agent = _make_agent(provider, model)
         st.session_state.messages = []
         st.session_state.current_mermaid = None
         st.session_state.current_spec = None
@@ -64,7 +72,7 @@ with st.sidebar:
 
 # ── Session state init ────────────────────────────────────────────────────────
 if "agent" not in st.session_state:
-    st.session_state.agent = WorkflowAgent(provider=provider, model=model)
+    st.session_state.agent = _make_agent(provider, model)
 if "messages" not in st.session_state:
     st.session_state.messages: list[dict] = []
 if "current_mermaid" not in st.session_state:

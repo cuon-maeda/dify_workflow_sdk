@@ -325,16 +325,65 @@ Answerノードのcontentには両方のLLM出力を並べて記述します。
 """
 
 
-class WorkflowAgent:
-    def __init__(self) -> None:
-        self.client = anthropic.Anthropic()
-        self.history: list[dict] = []
+# Available models per provider
+MODELS: dict[str, list[str]] = {
+    "Claude": [
+        "claude-opus-4-7",
+        "claude-sonnet-4-6",
+        "claude-haiku-4-5",
+    ],
+    "OpenAI": [
+        "gpt-4o",
+        "gpt-4o-mini",
+        "gpt-4-turbo",
+    ],
+}
 
+
+class WorkflowAgent:
+    def __init__(self, provider: str = "Claude", model: str = "claude-opus-4-7") -> None:
+        self.provider = provider
+        self.model = model
+        self.history: list[dict] = []
+        self._anthropic_client: anthropic.Anthropic | None = None
+        self._openai_client = None
+
+    # ── lazy clients ─────────────────────────────────────────────────────────
+    @property
+    def _anthropic(self) -> anthropic.Anthropic:
+        if self._anthropic_client is None:
+            self._anthropic_client = anthropic.Anthropic()
+        return self._anthropic_client
+
+    @property
+    def _openai(self):
+        if self._openai_client is None:
+            try:
+                from openai import OpenAI
+                self._openai_client = OpenAI()
+            except ImportError as exc:
+                raise RuntimeError("openai パッケージが必要です: pip install openai") from exc
+        return self._openai_client
+
+    # ── public API ────────────────────────────────────────────────────────────
     def chat(self, user_message: str) -> dict:
         self.history.append({"role": "user", "content": user_message})
 
-        with self.client.messages.stream(
-            model="claude-opus-4-7",
+        if self.provider == "Claude":
+            text = self._chat_claude()
+        else:
+            text = self._chat_openai()
+
+        self.history.append({"role": "assistant", "content": text})
+        return _parse_response(text)
+
+    def reset(self) -> None:
+        self.history = []
+
+    # ── provider implementations ──────────────────────────────────────────────
+    def _chat_claude(self) -> str:
+        with self._anthropic.messages.stream(
+            model=self.model,
             max_tokens=8192,
             system=[
                 {
@@ -346,16 +395,18 @@ class WorkflowAgent:
             messages=self.history,
         ) as stream:
             final = stream.get_final_message()
+        return next((b.text for b in final.content if b.type == "text"), "")
 
-        assistant_text = next(
-            (b.text for b in final.content if b.type == "text"), ""
+    def _chat_openai(self) -> str:
+        response = self._openai.chat.completions.create(
+            model=self.model,
+            max_tokens=8192,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                *self.history,
+            ],
         )
-        self.history.append({"role": "assistant", "content": assistant_text})
-
-        return _parse_response(assistant_text)
-
-    def reset(self) -> None:
-        self.history = []
+        return response.choices[0].message.content or ""
 
 
 def _parse_response(text: str) -> dict:

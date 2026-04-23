@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import sys
 import os
+import sys
 
 _here = os.path.dirname(os.path.abspath(__file__))
 _parent = os.path.dirname(_here)
@@ -10,7 +10,7 @@ for _p in (_here, _parent):
         sys.path.insert(0, _p)
 
 import streamlit as st
-from claude_agent import WorkflowAgent
+from claude_agent import WorkflowAgent, MODELS
 from workflow_builder import build_workflow_yaml
 
 st.set_page_config(
@@ -19,9 +19,46 @@ st.set_page_config(
     page_icon="🤖",
 )
 
+# ── Sidebar: model selection ──────────────────────────────────────────────────
+with st.sidebar:
+    st.title("⚙️ モデル設定")
+
+    provider = st.radio(
+        "AIプロバイダー",
+        options=list(MODELS.keys()),
+        index=0,
+        horizontal=True,
+    )
+    model = st.selectbox("モデル", options=MODELS[provider])
+
+    # API key status
+    st.divider()
+    if provider == "Claude":
+        key_set = bool(os.environ.get("ANTHROPIC_API_KEY"))
+        st.caption("🔑 ANTHROPIC_API_KEY: " + ("✅ 設定済み" if key_set else "❌ 未設定"))
+    else:
+        key_set = bool(os.environ.get("OPENAI_API_KEY"))
+        st.caption("🔑 OPENAI_API_KEY: " + ("✅ 設定済み" if key_set else "❌ 未設定"))
+        if not key_set:
+            st.warning("OPENAI_API_KEY が設定されていません。")
+
+    # Recreate agent when provider/model changes
+    current_key = f"{provider}/{model}"
+    if st.session_state.get("_model_key") != current_key:
+        st.session_state._model_key = current_key
+        st.session_state.agent = WorkflowAgent(provider=provider, model=model)
+        st.session_state.messages = []
+        st.session_state.current_mermaid = None
+        st.session_state.current_spec = None
+        st.session_state.pop("_yaml_preview", None)
+
+    st.divider()
+    st.caption(f"現在: **{provider} / {model}**")
+    st.caption("モデルを切り替えると会話がリセットされます。")
+
 # ── Session state init ────────────────────────────────────────────────────────
 if "agent" not in st.session_state:
-    st.session_state.agent = WorkflowAgent()
+    st.session_state.agent = WorkflowAgent(provider=provider, model=model)
 if "messages" not in st.session_state:
     st.session_state.messages: list[dict] = []
 if "current_mermaid" not in st.session_state:
@@ -31,7 +68,7 @@ if "current_spec" not in st.session_state:
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.title("🤖 Dify Workflow Designer")
-st.caption("自然言語でDifyワークフローを設計し、DSL YAMLとしてエクスポートします")
+st.caption(f"自然言語でDifyワークフローを設計し、DSL YAMLとしてエクスポートします　｜　使用中: {provider} / {model}")
 
 col1, col2 = st.columns([1, 1], gap="large")
 
@@ -39,30 +76,31 @@ col1, col2 = st.columns([1, 1], gap="large")
 with col1:
     st.subheader("💬 チャット")
 
-    # Display conversation history
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
 
-    # New user input
     prompt = st.chat_input(
         "ワークフローを説明してください…（例：GPT-4oでユーザーの質問に答えるチャットボットを作って）"
     )
     if prompt:
-        st.session_state.messages.append({"role": "user", "content": prompt})
+        if not key_set:
+            st.error("APIキーが設定されていません。環境変数を確認してください。")
+        else:
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            spinner_label = f"{provider} ({model}) がワークフローを設計中…"
+            with st.spinner(spinner_label):
+                result = st.session_state.agent.chat(prompt)
 
-        with st.spinner("Claude がワークフローを設計中…"):
-            result = st.session_state.agent.chat(prompt)
+            st.session_state.messages.append(
+                {"role": "assistant", "content": result["message"]}
+            )
+            if result.get("mermaid"):
+                st.session_state.current_mermaid = result["mermaid"]
+            if result.get("workflow_spec"):
+                st.session_state.current_spec = result["workflow_spec"]
 
-        st.session_state.messages.append(
-            {"role": "assistant", "content": result["message"]}
-        )
-        if result.get("mermaid"):
-            st.session_state.current_mermaid = result["mermaid"]
-        if result.get("workflow_spec"):
-            st.session_state.current_spec = result["workflow_spec"]
-
-        st.rerun()
+            st.rerun()
 
 # ── Right column: Diagram & Export ────────────────────────────────────────────
 with col2:
@@ -90,13 +128,11 @@ with col2:
 </html>"""
         st.components.v1.html(mermaid_html, height=380, scrolling=True)
 
-        # Show raw Mermaid source in expander
         with st.expander("Mermaid ソースを表示"):
             st.code(st.session_state.current_mermaid, language="text")
 
         st.divider()
 
-        # Export section
         if st.session_state.current_spec:
             st.markdown("**YAML エクスポート**")
             workflow_name = st.text_input(
@@ -142,7 +178,6 @@ with col2:
             "- 「Claudeを使ったカスタマーサポートボットに変更して」"
         )
 
-    # Reset button
     if st.session_state.messages:
         st.divider()
         if st.button("🔄 新しいワークフローを設計", use_container_width=True):

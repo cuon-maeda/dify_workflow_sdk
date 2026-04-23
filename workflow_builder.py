@@ -17,9 +17,17 @@ except ModuleNotFoundError:
     from workflow import Workflow  # type: ignore[no-redef]
     from nodes import Start, LLM, Answer, End, IfElse, Code, KnowledgeRetrieval  # type: ignore[no-redef]
 
-# Terminal node types must be created after all other nodes so variable
-# references in their content can be resolved using actual SDK node IDs.
-_TERMINAL_TYPES = {"answer", "end"}
+# Node build priority: earlier types must be created first so their IDs
+# are in node_map before downstream nodes (LLM, Answer) call resolve_vars().
+_NODE_PRIORITY: dict[str, int] = {
+    "start": 0,
+    "knowledge-retrieval": 1,
+    "code": 1,
+    "if-else": 2,
+    "llm": 3,
+    "answer": 4,
+    "end": 4,
+}
 
 
 def build_workflow_yaml(spec: dict) -> str:
@@ -30,9 +38,9 @@ def build_workflow_yaml(spec: dict) -> str:
     node_map: dict[str, object] = {}  # symbolic_id -> SDK node
 
     node_defs = spec.get("nodes", [])
-    sorted_defs = (
-        [n for n in node_defs if n.get("type") not in _TERMINAL_TYPES]
-        + [n for n in node_defs if n.get("type") in _TERMINAL_TYPES]
+    sorted_defs = sorted(
+        node_defs,
+        key=lambda n: _NODE_PRIORITY.get(n.get("type", ""), 2),
     )
 
     def resolve_vars(text: str) -> str:
@@ -61,8 +69,8 @@ def _build_node(wf: Workflow, node_def: dict, node_map: dict, resolve_vars):
         return wf.add(LLM(
             provider=node_def.get("provider", "openai"),
             model=node_def.get("model", "gpt-4o"),
-            system_prompt=node_def.get("system_prompt", ""),
-            user_prompt=node_def.get("user_prompt", "{{#sys.query#}}"),
+            system_prompt=resolve_vars(node_def.get("system_prompt", "")),
+            user_prompt=resolve_vars(node_def.get("user_prompt", "{{#sys.query#}}")),
         ))
 
     if node_type == "answer":

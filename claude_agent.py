@@ -325,7 +325,7 @@ Answerノードのcontentには両方のLLM出力を並べて記述します。
 """
 
 
-# Available models per provider
+# Available models per provider (used as selectbox defaults)
 MODELS: dict[str, list[str]] = {
     "Claude": [
         "claude-opus-4-7",
@@ -335,6 +335,9 @@ MODELS: dict[str, list[str]] = {
     "OpenAI": [
         "gpt-4o",
         "gpt-4o-mini",
+        "o3-mini",
+        "o1",
+        "o1-mini",
         "gpt-4-turbo",
     ],
 }

@@ -32,7 +32,10 @@ with st.sidebar:
         index=0,
         horizontal=True,
     )
-    model = st.selectbox("モデル", options=MODELS[provider])
+    model = st.selectbox("モデル（プリセット）", options=MODELS[provider])
+    custom = st.text_input("カスタムモデル名（任意）", placeholder="例: gpt-5, o3 など")
+    if custom.strip():
+        model = custom.strip()
 
     # API key status
     st.divider()
